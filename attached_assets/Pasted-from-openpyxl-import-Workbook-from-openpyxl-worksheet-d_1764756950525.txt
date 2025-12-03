@@ -1,0 +1,121 @@
+from openpyxl import Workbook
+from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.styles import PatternFill, Font
+from openpyxl.utils import get_column_letter
+from datetime import datetime, timedelta
+
+# Create workbook
+wb = Workbook()
+ws = wb.active
+ws.title = "Roster"
+
+# Headers (row 1)
+headers = ["Date", "Weekday", "Shift", "Assigned", "Hours"]
+for col, header in enumerate(headers, 1):
+    ws.cell(row=1, column=col, value=header).font = Font(bold=True)
+
+# Staff lists for dropdowns
+all_staff = '"Ashley,Peninah,Joflix,Locum"'
+sat_day_staff = '"Joflix"'  # Locked to you
+sat_night_staff = '"Ashley,Peninah,Locum"'
+sun_staff = '"Ashley,Peninah,Locum"'  # No Joflix
+weekday_staff = all_staff
+
+# Start date (change this in B2 after generating)
+start_date = datetime(2025, 12, 8)
+row = 2
+
+# Generate rows for ~4 weeks (adjust as needed)
+for i in range(28):  # 4 weeks
+    date = start_date + timedelta(days=i)
+    ws.cell(row, 1, date.strftime("%d-%b-%Y"))
+    ws.cell(row, 2, date.strftime("%a"))
+
+    # Shift logic (simplified; customize per your needs)
+    if date.weekday() == 5:  # Saturday
+        # Day row
+        ws.cell(row, 3, "Day " + str(12 if date.day % 7 else 8))  # Example shift lengths
+        dv_day = DataValidation(type="list", formula1=sat_day_staff)
+        ws.add_data_validation(dv_day)
+        dv_day.add(f"D{row}")
+        ws.cell(row, 4, "Joflix")  # Pre-fill
+        ws.cell(row, 5, 12 if date.day % 7 else 8)  # Hours
+        row += 1
+        # Night row
+        ws.cell(row, 1, date.strftime("%d-%b-%Y"))
+        ws.cell(row, 2, date.strftime("%a"))
+        ws.cell(row, 3, "Night " + str(12 if date.day % 7 else 16))
+        # Alternating Sat night
+        if date < datetime(2025, 12, 29):
+            alt = "Ashley" if (date.day // 7) % 2 == 0 else "Peninah"
+        else:
+            alt = "Locum"
+        ws.cell(row, 4, alt)
+        dv_night = DataValidation(type="list", formula1=sat_night_staff)
+        ws.add_data_validation(dv_night)
+        dv_night.add(f"D{row}")
+        ws.cell(row, 5, 12 if date.day % 7 else 16)
+    elif date.weekday() == 6:  # Sunday
+        # Day row
+        ws.cell(row, 3, "Day " + str(12 if date.day % 7 else 8))
+        dv_sun = DataValidation(type="list", formula1=sun_staff)
+        ws.add_data_validation(dv_sun)
+        dv_sun.add(f"D{row}")
+        ws.cell(row, 4, "Ashley" if (date.day // 7) % 2 == 0 else "Peninah")  # Example
+        ws.cell(row, 5, 12 if date.day % 7 else 8)
+        row += 1
+        # Night row
+        ws.cell(row, 1, date.strftime("%d-%b-%Y"))
+        ws.cell(row, 2, date.strftime("%a"))
+        ws.cell(row, 3, "Night " + str(12 if date.day % 7 else 16))
+        ws.cell(row, 4, "Peninah" if (date.day // 7) % 2 == 0 else "Ashley")
+        dv_sun.add(f"D{row}")
+        ws.cell(row, 5, 12 if date.day % 7 else 16)
+    else:  # Weekday
+        ws.cell(row, 3, "24")
+        dv_week = DataValidation(type="list", formula1=weekday_staff)
+        ws.add_data_validation(dv_week)
+        dv_week.add(f"D{row}")
+        # Pre-fill your 48h: Wed/Thu = Joflix
+        if date.weekday() in [2, 3]:  # Wed=2, Thu=3
+            ws.cell(row, 4, "Joflix")
+        elif date.weekday() == 0:  # Mon
+            ws.cell(row, 4, "Ashley")
+        elif date.weekday() == 1:  # Tue
+            ws.cell(row, 4, "Peninah")
+        else:  # Fri
+            ws.cell(row, 4, "Peninah" if date < datetime(2025, 12, 29) else "Locum")
+        ws.cell(row, 5, 24)
+    row += 1
+
+# Your 48h blocks pre-fill (Wed-Thu)
+for r in range(2, row, 7):  # Every week
+    ws[f"D{r+2}"] = "Joflix"  # Wed
+    ws[f"D{r+3}"] = "Joflix"  # Thu
+
+# Hours sum per person (add in a summary section, e.g., row 50+)
+# Example: Conditional formatting for >60h (manual in Excel: select E col > Conditional Formatting > >60 red)
+
+# Colors
+orange = PatternFill(start_color="FFA500", fill_type="solid")  # Your shifts
+pink = PatternFill(start_color="FFC0CB", fill_type="solid")  # Peninah
+blue = PatternFill(start_color="ADD8E6", fill_type="solid")  # Ashley
+grey = PatternFill(start_color="D3D3D3", fill_type="solid")  # Locum
+
+for r in range(2, row):
+    assigned = ws[f"D{r}"].value
+    if assigned == "Joflix":
+        ws[f"D{r}"].fill = orange
+    elif assigned == "Peninah":
+        ws[f"D{r}"].fill = pink
+    elif assigned == "Ashley":
+        ws[f"D{r}"].fill = blue
+    elif assigned == "Locum":
+        ws[f"D{r}"].fill = grey
+
+# Auto-replicate: In B1, add note: "Enter start Monday in A2 to regenerate"
+ws["A1"] = "Start Date (Monday):"
+
+# Save
+wb.save("roster_template.xlsx")
+print("Template saved as roster_template.xlsx")
