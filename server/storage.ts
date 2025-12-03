@@ -1,5 +1,5 @@
 import { eq, desc } from "drizzle-orm";
-import { db } from "./db";
+import { createDb } from "./db";
 import { 
   rosters, 
   shifts, 
@@ -52,8 +52,10 @@ function dbShiftToRosterShift(dbShift: DbShift): RosterShift {
 }
 
 export class DatabaseStorage implements IStorage {
+  private db = createDb();
+
   async getActiveRoster(): Promise<Roster | null> {
-    const [activeRoster] = await db
+    const [activeRoster] = await this.db
       .select()
       .from(rosters)
       .where(eq(rosters.isActive, true))
@@ -65,7 +67,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRosterById(id: string): Promise<Roster | null> {
-    const [roster] = await db
+    const [roster] = await this.db
       .select()
       .from(rosters)
       .where(eq(rosters.id, id))
@@ -73,7 +75,7 @@ export class DatabaseStorage implements IStorage {
     
     if (!roster) return null;
     
-    const rosterShifts = await db
+    const rosterShifts = await this.db
       .select()
       .from(shifts)
       .where(eq(shifts.rosterId, id));
@@ -93,7 +95,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllRosters(): Promise<RosterSummary[]> {
-    const allRosters = await db
+    const allRosters = await this.db
       .select()
       .from(rosters)
       .orderBy(desc(rosters.createdAt));
@@ -101,7 +103,7 @@ export class DatabaseStorage implements IStorage {
     const summaries: RosterSummary[] = [];
     
     for (const roster of allRosters) {
-      const shiftCount = await db
+      const shiftCount = await this.db
         .select()
         .from(shifts)
         .where(eq(shifts.rosterId, roster.id));
@@ -127,10 +129,10 @@ export class DatabaseStorage implements IStorage {
     const now = new Date();
     
     // Deactivate all existing rosters
-    await db.update(rosters).set({ isActive: false });
+    await this.db.update(rosters).set({ isActive: false });
     
     // Insert the new roster
-    await db.insert(rosters).values({
+    await this.db.insert(rosters).values({
       id: rosterId,
       name: roster.name,
       startDate: roster.startDate,
@@ -144,7 +146,7 @@ export class DatabaseStorage implements IStorage {
     
     // Insert all shifts
     if (roster.shifts.length > 0) {
-      await db.insert(shifts).values(
+      await this.db.insert(shifts).values(
         roster.shifts.map((shift) => ({
           id: shift.id,
           rosterId: rosterId,
@@ -164,7 +166,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateShift(shiftId: string, assigned: StaffMember | null): Promise<RosterShift | null> {
     // Get the current shift
-    const [shift] = await db
+    const [shift] = await this.db
       .select()
       .from(shifts)
       .where(eq(shifts.id, shiftId))
@@ -179,19 +181,19 @@ export class DatabaseStorage implements IStorage {
     }
     
     // Update the shift
-    await db
+    await this.db
       .update(shifts)
       .set({ assigned })
       .where(eq(shifts.id, shiftId));
     
     // Update the roster's updatedAt
-    await db
+    await this.db
       .update(rosters)
       .set({ updatedAt: new Date() })
       .where(eq(rosters.id, shift.rosterId));
     
     // Get updated shift
-    const [updatedShift] = await db
+    const [updatedShift] = await this.db
       .select()
       .from(shifts)
       .where(eq(shifts.id, shiftId))
@@ -202,10 +204,10 @@ export class DatabaseStorage implements IStorage {
 
   async setActiveRoster(rosterId: string): Promise<void> {
     // Deactivate all rosters
-    await db.update(rosters).set({ isActive: false });
+    await this.db.update(rosters).set({ isActive: false });
     
     // Activate the specified roster
-    await db
+    await this.db
       .update(rosters)
       .set({ isActive: true })
       .where(eq(rosters.id, rosterId));
@@ -213,7 +215,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteRoster(rosterId: string): Promise<void> {
     // Shifts are deleted automatically via cascade
-    await db.delete(rosters).where(eq(rosters.id, rosterId));
+    await this.db.delete(rosters).where(eq(rosters.id, rosterId));
   }
 
   // Swap request operations
@@ -226,7 +228,7 @@ export class DatabaseStorage implements IStorage {
     const requestId = randomUUID();
     
     // Get shift details
-    const [shift] = await db
+    const [shift] = await this.db
       .select()
       .from(shifts)
       .where(eq(shifts.id, shiftId))
@@ -236,7 +238,7 @@ export class DatabaseStorage implements IStorage {
       throw new Error("Shift not found");
     }
     
-    await db.insert(swapRequests).values({
+    await this.db.insert(swapRequests).values({
       id: requestId,
       shiftId,
       fromStaff,
@@ -260,19 +262,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSwapRequests(status?: "pending" | "approved" | "rejected"): Promise<SwapRequestWithDetails[]> {
-    let query = db
+    let query = this.db
       .select()
       .from(swapRequests)
       .orderBy(desc(swapRequests.createdAt));
     
     const requests = status 
-      ? await db.select().from(swapRequests).where(eq(swapRequests.status, status)).orderBy(desc(swapRequests.createdAt))
-      : await db.select().from(swapRequests).orderBy(desc(swapRequests.createdAt));
+      ? await this.db.select().from(swapRequests).where(eq(swapRequests.status, status)).orderBy(desc(swapRequests.createdAt))
+      : await this.db.select().from(swapRequests).orderBy(desc(swapRequests.createdAt));
     
     const result: SwapRequestWithDetails[] = [];
     
     for (const req of requests) {
-      const [shift] = await db
+      const [shift] = await this.db
         .select()
         .from(shifts)
         .where(eq(shifts.id, req.shiftId))
@@ -298,7 +300,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async respondToSwapRequest(requestId: string, status: "approved" | "rejected"): Promise<SwapRequestWithDetails | null> {
-    const [request] = await db
+    const [request] = await this.db
       .select()
       .from(swapRequests)
       .where(eq(swapRequests.id, requestId))
@@ -308,20 +310,20 @@ export class DatabaseStorage implements IStorage {
     
     const now = new Date();
     
-    await db
+    await this.db
       .update(swapRequests)
       .set({ status, respondedAt: now })
       .where(eq(swapRequests.id, requestId));
     
     // If approved, update the shift assignment
     if (status === "approved") {
-      await db
+      await this.db
         .update(shifts)
         .set({ assigned: request.toStaff })
         .where(eq(shifts.id, request.shiftId));
     }
     
-    const [shift] = await db
+    const [shift] = await this.db
       .select()
       .from(shifts)
       .where(eq(shifts.id, request.shiftId))
@@ -352,7 +354,7 @@ export class DatabaseStorage implements IStorage {
   ): Promise<Notification> {
     const notificationId = randomUUID();
     
-    await db.insert(notifications).values({
+    await this.db.insert(notifications).values({
       id: notificationId,
       staffMember,
       type,
@@ -380,26 +382,26 @@ export class DatabaseStorage implements IStorage {
     let result;
     
     if (staffMember && unreadOnly) {
-      result = await db
+      result = await this.db
         .select()
         .from(notifications)
         .where(eq(notifications.staffMember, staffMember))
         .orderBy(desc(notifications.createdAt));
       result = result.filter(n => !n.read);
     } else if (staffMember) {
-      result = await db
+      result = await this.db
         .select()
         .from(notifications)
         .where(eq(notifications.staffMember, staffMember))
         .orderBy(desc(notifications.createdAt));
     } else if (unreadOnly) {
-      result = await db
+      result = await this.db
         .select()
         .from(notifications)
         .where(eq(notifications.read, false))
         .orderBy(desc(notifications.createdAt));
     } else {
-      result = await db
+      result = await this.db
         .select()
         .from(notifications)
         .orderBy(desc(notifications.createdAt));
@@ -419,18 +421,222 @@ export class DatabaseStorage implements IStorage {
   }
 
   async markNotificationRead(notificationId: string): Promise<void> {
-    await db
+    await this.db
       .update(notifications)
       .set({ read: true })
       .where(eq(notifications.id, notificationId));
   }
 
   async markAllNotificationsRead(staffMember: StaffMember): Promise<void> {
-    await db
+    await this.db
       .update(notifications)
       .set({ read: true })
       .where(eq(notifications.staffMember, staffMember));
   }
 }
 
-export const storage = new DatabaseStorage();
+class InMemoryStorage implements IStorage {
+  private rosters: Roster[] = [];
+  private swapRequests: SwapRequestWithDetails[] = [];
+  private notifications: Notification[] = [];
+
+  async getActiveRoster(): Promise<Roster | null> {
+    return this.rosters.find((r) => r.isActive) ?? null;
+  }
+
+  async getRosterById(id: string): Promise<Roster | null> {
+    return this.rosters.find((r) => r.id === id) ?? null;
+  }
+
+  async getAllRosters(): Promise<RosterSummary[]> {
+    return this.rosters
+      .slice()
+      .sort((a, b) => (a.createdAt && b.createdAt ? (a.createdAt < b.createdAt ? 1 : -1) : 0))
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        startDate: r.startDate,
+        endDate: r.endDate,
+        weeks: r.weeks,
+        createdAt: r.createdAt ?? new Date().toISOString(),
+        isActive: !!r.isActive,
+        version: r.version ?? 1,
+        shiftCount: r.shifts.length,
+      }));
+  }
+
+  async saveRoster(roster: Omit<Roster, "id"> & { id?: string }): Promise<Roster> {
+    const id = roster.id || randomUUID();
+    const now = new Date().toISOString();
+
+    // Deactivate all existing rosters
+    this.rosters = this.rosters.map((r) => ({ ...r, isActive: false }));
+
+    const newRoster: Roster = {
+      ...roster,
+      id,
+      createdAt: now,
+      updatedAt: now,
+      isActive: true,
+      version: roster.version ?? 1,
+    };
+
+    // Remove any previous roster with same id, then add new
+    this.rosters = this.rosters.filter((r) => r.id !== id);
+    this.rosters.push(newRoster);
+
+    return newRoster;
+  }
+
+  async updateShift(shiftId: string, assigned: StaffMember | null): Promise<RosterShift | null> {
+    for (const roster of this.rosters) {
+      const shiftIndex = roster.shifts.findIndex((s) => s.id === shiftId);
+      if (shiftIndex !== -1) {
+        const shift = roster.shifts[shiftIndex];
+        if (assigned !== null && !shift.allowedStaff.includes(assigned)) {
+          throw new Error(`Staff member ${assigned} is not allowed for this shift`);
+        }
+
+        const updatedShift: RosterShift = { ...shift, assigned };
+        roster.shifts[shiftIndex] = updatedShift;
+        roster.updatedAt = new Date().toISOString();
+        return updatedShift;
+      }
+    }
+    return null;
+  }
+
+  async setActiveRoster(rosterId: string): Promise<void> {
+    this.rosters = this.rosters.map((r) => ({
+      ...r,
+      isActive: r.id === rosterId,
+    }));
+  }
+
+  async deleteRoster(rosterId: string): Promise<void> {
+    this.rosters = this.rosters.filter((r) => r.id !== rosterId);
+  }
+
+  async createSwapRequest(
+    shiftId: string,
+    fromStaff: StaffMember,
+    toStaff: StaffMember,
+    reason?: string
+  ): Promise<SwapRequestWithDetails> {
+    // Find shift
+    let foundShift: RosterShift | undefined;
+    for (const roster of this.rosters) {
+      const shift = roster.shifts.find((s) => s.id === shiftId);
+      if (shift) {
+        foundShift = shift;
+        break;
+      }
+    }
+    if (!foundShift) {
+      throw new Error("Shift not found");
+    }
+
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const req: SwapRequestWithDetails = {
+      id,
+      shiftId,
+      shiftDate: foundShift.date,
+      shiftType: foundShift.shiftType,
+      fromStaff,
+      toStaff,
+      status: "pending",
+      reason: reason ?? null,
+      createdAt: now,
+      respondedAt: null,
+    };
+    this.swapRequests.push(req);
+    return req;
+  }
+
+  async getSwapRequests(status?: "pending" | "approved" | "rejected"): Promise<SwapRequestWithDetails[]> {
+    let result = this.swapRequests.slice();
+    if (status) {
+      result = result.filter((r) => r.status === status);
+    }
+    return result.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
+  async respondToSwapRequest(requestId: string, status: "approved" | "rejected"): Promise<SwapRequestWithDetails | null> {
+    const idx = this.swapRequests.findIndex((r) => r.id === requestId);
+    if (idx === -1) return null;
+
+    const now = new Date().toISOString();
+    const req = this.swapRequests[idx];
+    const updated: SwapRequestWithDetails = { ...req, status, respondedAt: now };
+    this.swapRequests[idx] = updated;
+
+    if (status === "approved") {
+      // Update shift assignment
+      for (const roster of this.rosters) {
+        const shift = roster.shifts.find((s) => s.id === req.shiftId);
+        if (shift) {
+          shift.assigned = req.toStaff;
+          roster.updatedAt = now;
+          break;
+        }
+      }
+    }
+
+    return updated;
+  }
+
+  async createNotification(
+    staffMember: StaffMember,
+    type: string,
+    title: string,
+    message: string,
+    relatedShiftId?: string,
+    relatedSwapId?: string
+  ): Promise<Notification> {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const notification: Notification = {
+      id,
+      staffMember,
+      type: type as Notification["type"],
+      title,
+      message,
+      read: false,
+      createdAt: now,
+      relatedShiftId: relatedShiftId ?? null,
+      relatedSwapId: relatedSwapId ?? null,
+    };
+    this.notifications.push(notification);
+    return notification;
+  }
+
+  async getNotifications(staffMember?: StaffMember, unreadOnly?: boolean): Promise<Notification[]> {
+    let result = this.notifications.slice();
+
+    if (staffMember) {
+      result = result.filter((n) => n.staffMember === staffMember);
+    }
+    if (unreadOnly) {
+      result = result.filter((n) => !n.read);
+    }
+
+    return result.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
+  async markNotificationRead(notificationId: string): Promise<void> {
+    this.notifications = this.notifications.map((n) =>
+      n.id === notificationId ? { ...n, read: true } : n
+    );
+  }
+
+  async markAllNotificationsRead(staffMember: StaffMember): Promise<void> {
+    this.notifications = this.notifications.map((n) =>
+      n.staffMember === staffMember ? { ...n, read: true } : n
+    );
+  }
+}
+
+export const storage: IStorage = process.env.DATABASE_URL
+  ? new DatabaseStorage()
+  : new InMemoryStorage();
